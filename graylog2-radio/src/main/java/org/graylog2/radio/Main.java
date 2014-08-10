@@ -19,7 +19,6 @@ package org.graylog2.radio;
 import com.beust.jcommander.JCommander;
 import com.codahale.metrics.JmxReporter;
 import com.codahale.metrics.MetricRegistry;
-import com.codahale.metrics.log4j.InstrumentedAppender;
 import com.github.joschi.jadconfig.JadConfig;
 import com.github.joschi.jadconfig.ParameterException;
 import com.github.joschi.jadconfig.RepositoryException;
@@ -33,7 +32,11 @@ import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.ServiceManager;
 import com.google.inject.Injector;
 import com.google.inject.Module;
-import org.apache.log4j.Level;
+import log4j2.InstrumentedAppender;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.layout.PatternLayout;
 import org.graylog2.plugin.Plugin;
 import org.graylog2.plugin.PluginModule;
 import org.graylog2.plugin.ServerStatus;
@@ -49,7 +52,6 @@ import org.graylog2.shared.plugins.PluginLoader;
 import org.joda.time.DateTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.slf4j.bridge.SLF4JBridgeHandler;
 
 import java.io.File;
 import java.util.Arrays;
@@ -87,7 +89,7 @@ public class Main extends NodeRunner {
             System.exit(0);
         }
 
-        if(commandLineArguments.isDumpDefaultConfig()) {
+        if (commandLineArguments.isDumpDefaultConfig()) {
             final JadConfig jadConfig = new JadConfig();
             jadConfig.addConverterFactory(new JodaTimeConverterFactory());
             jadConfig.addConfigurationBean(new Configuration());
@@ -104,12 +106,8 @@ public class Main extends NodeRunner {
             System.exit(0);
         }
 
-        // Are we in debug mode?
-        Level logLevel = Level.INFO;
-        if (commandLineArguments.isDebug()) {
-            LOG.info("Running in Debug mode");
-            logLevel = Level.DEBUG;
-        }
+        final Level logLevel = commandLineArguments.isDebug() ? Level.DEBUG : Level.INFO;
+        initializeLogging(logLevel);
 
         PluginLoader pluginLoader = new PluginLoader(new File(configuration.getPluginDir()));
         List<PluginModule> pluginModules = Lists.newArrayList();
@@ -134,14 +132,7 @@ public class Main extends NodeRunner {
         final JmxReporter reporter = JmxReporter.forRegistry(metrics).build();
         reporter.start();
 
-        InstrumentedAppender logMetrics = new InstrumentedAppender(metrics);
-        logMetrics.activateOptions();
-        org.apache.log4j.Logger.getRootLogger().setLevel(logLevel);
-        org.apache.log4j.Logger.getLogger(Main.class.getPackage().getName()).setLevel(logLevel);
-        org.apache.log4j.Logger.getRootLogger().addAppender(logMetrics);
-
-        SLF4JBridgeHandler.removeHandlersForRootLogger();
-        SLF4JBridgeHandler.install();
+        addInstrumentedAppender(metrics, logLevel);
 
         LOG.info("Graylog2 Radio {} starting up. (JRE: {})", RadioVersion.VERSION, Tools.getSystemInformation());
 
@@ -165,8 +156,30 @@ public class Main extends NodeRunner {
         LOG.info("Graylog2 Radio up and running.");
 
         while (true) {
-            try { Thread.sleep(1000); } catch (InterruptedException e) { /* lol, i don't care */ }
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) { /* lol, i don't care */ }
         }
+    }
+
+    private static void initializeLogging(final Level logLevel) {
+        final LoggerContext context = (LoggerContext) LogManager.getContext(false);
+        final org.apache.logging.log4j.core.config.Configuration config = context.getConfiguration();
+
+        config.getLoggerConfig(LogManager.ROOT_LOGGER_NAME).setLevel(logLevel);
+        config.getLoggerConfig(Main.class.getPackage().getName()).setLevel(logLevel);
+
+        context.updateLoggers(config);
+    }
+
+    private static void addInstrumentedAppender(final MetricRegistry metrics, final Level level) {
+        final InstrumentedAppender appender = new InstrumentedAppender(metrics, null, null, false);
+        appender.start();
+
+        final LoggerContext context = (LoggerContext) LogManager.getContext(false);
+        final org.apache.logging.log4j.core.config.Configuration config = context.getConfiguration();
+        config.getLoggerConfig(LogManager.ROOT_LOGGER_NAME).addAppender(appender, level, null);
+        context.updateLoggers(config);
     }
 
     private static Configuration readConfiguration(final JadConfig jadConfig, final String configFile) {

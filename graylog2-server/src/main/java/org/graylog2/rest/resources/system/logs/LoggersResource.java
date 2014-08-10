@@ -24,8 +24,11 @@ import com.wordnik.swagger.annotations.ApiOperation;
 import com.wordnik.swagger.annotations.ApiParam;
 import com.wordnik.swagger.annotations.ApiResponse;
 import com.wordnik.swagger.annotations.ApiResponses;
-import org.apache.log4j.Level;
-import org.apache.log4j.Logger;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.config.Configuration;
+import org.apache.logging.log4j.core.config.LoggerConfig;
 import org.apache.shiro.authz.annotation.RequiresAuthentication;
 import org.graylog2.rest.resources.RestResource;
 import org.graylog2.security.RestPermissions;
@@ -38,7 +41,7 @@ import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
-import java.util.Enumeration;
+import java.util.Collection;
 import java.util.Map;
 
 @RequiresAuthentication
@@ -47,38 +50,59 @@ import java.util.Map;
 public class LoggersResource extends RestResource {
 
     private static final org.slf4j.Logger LOG = LoggerFactory.getLogger(LoggersResource.class);
-
-    private static final Map<String, Subsystem> SUBSYSTEMS = ImmutableMap.<String, Subsystem>of(
+    private static final Map<Level, Integer> SYSLOG_EQUIVALENTS;
+    private static final Map<String, Subsystem> SUBSYSTEMS = ImmutableMap.of(
             "graylog2", new Subsystem("Graylog2", "org.graylog2", "All messages from graylog2-owned systems."),
             "indexer", new Subsystem("Indexer", "org.elasticsearch", "All messages related to indexing and searching."),
             "authentication", new Subsystem("Authentication", "org.apache.shiro", "All user authentication messages."),
-            "sockets", new Subsystem("Sockets", "netty", "All messages related to socket communication."));
+            "sockets", new Subsystem("Sockets", "netty", "All messages related to socket communication.")
+    );
+
+    static {
+        SYSLOG_EQUIVALENTS = ImmutableMap.<Level, Integer>builder()
+                .put(Level.OFF, 0)
+                .put(Level.FATAL, 0)
+                .put(Level.ERROR, 3)
+                .put(Level.WARN, 4)
+                .put(Level.INFO, 6)
+                .put(Level.DEBUG, 7)
+                .put(Level.TRACE, 7)
+                .put(Level.ALL, 7)
+                .build();
+    }
 
     @GET
     @Timed
     @ApiOperation(value = "List all loggers and their current levels")
     @Produces(MediaType.APPLICATION_JSON)
     public String loggers() {
-        Map<String, Object> loggerList = Maps.newHashMap();
+        final Map<String, Object> loggerList = Maps.newHashMap();
 
-        Enumeration loggers = Logger.getRootLogger().getLoggerRepository().getCurrentLoggers();
-        while (loggers.hasMoreElements()) {
-            Logger logger = (Logger) loggers.nextElement();
-            if (!isPermitted(RestPermissions.LOGGERS_READ, logger.getName())) {
+        for (LoggerConfig loggerConfig : getLoggerConfigs()) {
+            if (!isPermitted(RestPermissions.LOGGERS_READ, loggerConfig.getName())) {
                 continue;
             }
-            Map<String, Object> loggerInfo = Maps.newHashMap();
-            loggerInfo.put("level", logger.getEffectiveLevel().toString().toLowerCase());
-            loggerInfo.put("level_syslog", logger.getEffectiveLevel().getSyslogEquivalent());
 
-            loggerList.put(logger.getName(), loggerInfo);
+            final Map<String, Object> loggerInfo = ImmutableMap.<String, Object>of(
+                    "level", loggerConfig.getLevel().name().toLowerCase(),
+                    "level_syslog", SYSLOG_EQUIVALENTS.get(loggerConfig.getLevel())
+            );
+
+            loggerList.put(loggerConfig.getName(), loggerInfo);
         }
 
-        Map<String, Object> result = Maps.newHashMap();
-        result.put("loggers", loggerList);
-        result.put("total", loggerList.size());
+        final Map<String, Object> result = ImmutableMap.of(
+                "loggers", loggerList,
+                "total", loggerList.size()
+        );
 
         return json(result);
+    }
+
+    private Collection<LoggerConfig> getLoggerConfigs() {
+        final LoggerContext loggerContext = (LoggerContext) LogManager.getContext(false);
+        final Configuration configuration = loggerContext.getConfiguration();
+        return configuration.getLoggers().values();
     }
 
     @GET
@@ -87,34 +111,47 @@ public class LoggersResource extends RestResource {
     @ApiOperation(value = "List all logger subsystems and their current levels")
     @Produces(MediaType.APPLICATION_JSON)
     public String subsytems() {
-        Map<String, Object> result = Maps.newHashMap();
-        Map<String, Object> subsystems = Maps.newHashMap();
+        final Map<String, Object> subsystems = Maps.newHashMap();
 
         for (Map.Entry<String, Subsystem> subsystem : SUBSYSTEMS.entrySet()) {
             if (!isPermitted(RestPermissions.LOGGERS_READSUBSYSTEM, subsystem.getKey())) {
                 continue;
             }
             try {
-                Map<String, Object> info = Maps.newHashMap();
-                info.put("title", subsystem.getValue().getTitle());
-                info.put("category", subsystem.getValue().getCategory());
-                info.put("description", subsystem.getValue().getDescription());
+                final String category = subsystem.getValue().getCategory();
+                final Level level = getLoggerLevel(category);
 
-                // Get level.
-                Level effectiveLevel = Logger.getLogger(subsystem.getValue().getCategory()).getEffectiveLevel();
-                info.put("level", effectiveLevel.toString().toLowerCase());
-                info.put("level_syslog", effectiveLevel.getSyslogEquivalent());
+                final Map<String, Object> info = ImmutableMap.<String, Object>of(
+                        "title", subsystem.getValue().getTitle(),
+                        "category", subsystem.getValue().getCategory(),
+                        "description", subsystem.getValue().getDescription(),
+                        "level", level.name().toLowerCase(),
+                        "level_syslog", SYSLOG_EQUIVALENTS.get(level)
+                );
 
                 subsystems.put(subsystem.getKey(), info);
             } catch (Exception e) {
                 LOG.error("Error while listing logger subsystem.", e);
-                continue;
             }
         }
 
-        result.put("subsystems", subsystems);
+        return json(ImmutableMap.of("subsystems", subsystems));
+    }
 
-        return json(result);
+    private Level getLoggerLevel(final String loggerName) {
+        final LoggerContext loggerContext = (LoggerContext) LogManager.getContext(false);
+        final Configuration configuration = loggerContext.getConfiguration();
+        final LoggerConfig loggerConfig = configuration.getLoggerConfig(loggerName);
+
+        return loggerConfig.getLevel();
+    }
+
+    private void setLoggerLevel(final String loggerName, final Level level) {
+        final LoggerContext context = (LoggerContext) LogManager.getContext(false);
+        final Configuration config = context.getConfiguration();
+
+        config.getLoggerConfig(loggerName).setLevel(level);
+        context.updateLoggers(config);
     }
 
     @PUT
@@ -135,12 +172,7 @@ public class LoggersResource extends RestResource {
         checkPermission(RestPermissions.LOGGERS_EDITSUBSYSTEM, subsystemTitle);
         Subsystem subsystem = SUBSYSTEMS.get(subsystemTitle);
 
-        // This is never null. Worst case is a logger that does not exist.
-        Logger logger = Logger.getLogger(subsystem.getCategory());
-
-        // Setting the level falls back to DEBUG if provided level is invalid.
-        Level newLevel = Level.toLevel(level.toUpperCase());
-        logger.setLevel(newLevel);
+        setLoggerLevel(subsystem.getCategory(), Level.toLevel(level.toUpperCase()));
 
         return Response.ok().build();
     }
@@ -154,12 +186,8 @@ public class LoggersResource extends RestResource {
             @ApiParam(name = "loggerName", required = true) @PathParam("loggerName") String loggerName,
             @ApiParam(name = "level", required = true) @PathParam("level") String level) {
         checkPermission(RestPermissions.LOGGERS_EDIT, loggerName);
-        // This is never null. Worst case is a logger that does not exist.
-        Logger logger = Logger.getLogger(loggerName);
 
-        // Setting the level falls back to DEBUG if provided level is invalid.
-        Level newLevel = Level.toLevel(level.toUpperCase());
-        logger.setLevel(newLevel);
+        setLoggerLevel(loggerName, Level.toLevel(level.toUpperCase()));
 
         return Response.ok().build();
     }

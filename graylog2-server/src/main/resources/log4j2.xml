@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration>
+    <Appenders>
+        <Console name="STDOUT" target="SYSTEM_OUT">
+            <PatternLayout pattern="%d %-5p: %c - %m%n"/>
+        </Console>
+    </Appenders>
+    <Loggers>
+        <Logger name="org.graylog2" level="info"/>
+        <Logger name="org.apache.directory.api.ldap.model.message.BindRequestImpl" level="error"/>
+        <Logger name="org.elasticsearch.script" level="warn"/>
+
+        <Root level="warn">
+            <AppenderRef ref="STDOUT"/>
+        </Root>
+    </Loggers>
+</Configuration>
