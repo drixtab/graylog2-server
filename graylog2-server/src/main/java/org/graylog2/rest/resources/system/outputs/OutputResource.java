@@ -111,16 +111,21 @@ public class OutputResource extends RestResource {
     })
     public Response create(@ApiParam(name = "JSON body", required = true) CreateOutputRequest csor) throws ValidationException {
         checkPermission(RestPermissions.OUTPUTS_CREATE);
-        final AvailableOutputSummary outputSummary = messageOutputFactory.getAvailableOutputs().get(csor.type);
+        final AvailableOutputSummary outputSummary = messageOutputFactory.getAvailableOutputs().get(csor.type());
 
         if (outputSummary == null) {
             throw new ValidationException("type", "Invalid output type");
         }
 
         // Make sure the config values will be stored with the correct type.
-        csor.configuration = ConfigurationMapConverter.convertValues(csor.configuration, outputSummary.requestedConfiguration);
+        final CreateOutputRequest createOutputRequest = CreateOutputRequest.create(
+                csor.title(),
+                csor.type(),
+                ConfigurationMapConverter.convertValues(csor.configuration(), outputSummary.requestedConfiguration()),
+                csor.streams()
+        );
 
-        final Output output = outputService.create(csor, getCurrentUser().getName());
+        final Output output = outputService.create(createOutputRequest, getCurrentUser().getName());
         final URI outputUri = UriBuilder.fromResource(OutputResource.class)
                 .path("{outputId}")
                 .build(output.getId());
@@ -138,7 +143,7 @@ public class OutputResource extends RestResource {
             @ApiResponse(code = 404, message = "No such stream/output on this node.")
     })
     public void delete(@ApiParam(name = "outputId", value = "The id of the output that should be deleted", required = true)
-                           @PathParam("outputId") String outputId) throws org.graylog2.database.NotFoundException {
+                       @PathParam("outputId") String outputId) throws org.graylog2.database.NotFoundException {
         checkPermission(RestPermissions.OUTPUTS_TERMINATE);
         Output output = outputService.load(outputId);
         outputService.destroy(output);

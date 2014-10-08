@@ -27,9 +27,14 @@ import org.graylog2.plugin.streams.Output;
 import org.graylog2.plugin.streams.Stream;
 import org.graylog2.streams.outputs.CreateOutputRequest;
 import org.joda.time.DateTime;
+import org.joda.time.DateTimeZone;
 
 import javax.inject.Inject;
-import java.util.*;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public class OutputServiceImpl extends PersistedServiceImpl implements OutputService {
     private final StreamService streamService;
@@ -91,7 +96,7 @@ public class OutputServiceImpl extends PersistedServiceImpl implements OutputSer
 
     @Override
     public Output create(CreateOutputRequest request, String userId) throws ValidationException {
-        return create(new OutputImpl(request.title, request.type, request.configuration, DateTime.now().toDate(), userId, request.contentPack));
+        return create(new OutputImpl(request.title(), request.type(), request.configuration(), DateTime.now(DateTimeZone.UTC).toDate(), userId, request.contentPack()));
     }
 
     @Override

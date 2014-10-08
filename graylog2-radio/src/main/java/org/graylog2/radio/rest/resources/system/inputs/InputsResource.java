@@ -104,17 +104,17 @@ public class InputsResource extends RestResource {
         }
 
         // Build a proper configuration from POST data.
-        Configuration inputConfig = new Configuration(lr.configuration);
+        Configuration inputConfig = new Configuration(lr.configuration());
 
         // Build input.
         DateTime createdAt = new DateTime(DateTimeZone.UTC);
         MessageInput input;
         try {
-            input = inputRegistry.create(lr.type, inputConfig);
-            input.setTitle(lr.title);
-            input.setCreatorUserId(lr.creatorUserId);
+            input = inputRegistry.create(lr.type(), inputConfig);
+            input.setTitle(lr.title());
+            input.setCreatorUserId(lr.creatorUserId());
             input.setCreatedAt(createdAt);
-            input.setGlobal(lr.global);
+            input.setGlobal(lr.global());
 
             input.setConfiguration(inputConfig);
 

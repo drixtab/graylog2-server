@@ -26,9 +26,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
-/**
- * @author Dennis Oelkers <dennis@torch.sh>
- */
 public class MessageOutputFactory {
     private final Set<Class<? extends MessageOutput>> availableMessageOutputClasses;
     private final InstantiationService instantiationService;
@@ -42,30 +39,32 @@ public class MessageOutputFactory {
 
     public MessageOutput fromStreamOutput(Output output) {
         final Class<? extends MessageOutput> messageOutputClass = findMessageOutputClassForStreamOutput(output.getType());
-        final MessageOutput messageOutput = instantiationService.getInstance(messageOutputClass);
 
-        return messageOutput;
+        return instantiationService.getInstance(messageOutputClass);
     }
 
     private Class<? extends MessageOutput> findMessageOutputClassForStreamOutput(String type) {
-        for (Class<? extends MessageOutput> messageOutputClass : availableMessageOutputClasses)
-            if (messageOutputClass.getName().equals(type))
+        for (Class<? extends MessageOutput> messageOutputClass : availableMessageOutputClasses) {
+            if (messageOutputClass.getName().equals(type)) {
                 return messageOutputClass;
+            }
+        }
 
         throw new IllegalArgumentException("No class found for type " + type);
     }
 
     public Map<String, AvailableOutputSummary> getAvailableOutputs() {
-        Map<String, AvailableOutputSummary> result = new HashMap<>();
 
+        final Map<String, AvailableOutputSummary> result = new HashMap<>(availableMessageOutputClasses.size());
         for (Class<? extends MessageOutput> messageOutputClass : availableMessageOutputClasses) {
-            MessageOutput messageOutput = instantiationService.getInstance(messageOutputClass);
-            AvailableOutputSummary availableOutputSummary = new AvailableOutputSummary();
-            availableOutputSummary.requestedConfiguration = messageOutput.getRequestedConfiguration();
-            availableOutputSummary.name = messageOutput.getName();
-            availableOutputSummary.type = messageOutput.getClass().getCanonicalName();
-            availableOutputSummary.humanName = messageOutput.getHumanName();
-            availableOutputSummary.linkToDocs = messageOutput.getLinkToDocs();
+            final MessageOutput messageOutput = instantiationService.getInstance(messageOutputClass);
+            final AvailableOutputSummary availableOutputSummary = AvailableOutputSummary.create(
+                    messageOutput.getName(),
+                    messageOutput.getClass().getCanonicalName(),
+                    messageOutput.getHumanName(),
+                    messageOutput.getLinkToDocs(),
+                    messageOutput.getRequestedConfiguration()
+            );
             result.put(messageOutputClass.getCanonicalName(), availableOutputSummary);
         }
 
