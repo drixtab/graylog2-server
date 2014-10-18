@@ -48,11 +48,11 @@ import static org.joda.time.DateTimeZone.UTC;
 public class Message {
     private static final Logger LOG = LoggerFactory.getLogger(Message.class);
 
-    private static final String FIELD_ID = "_id".intern();
-    private static final String FIELD_MESSAGE = "message".intern();
-    private static final String FIELD_SOURCE = "source".intern();
-    private static final String FIELD_TIMESTAMP = "timestamp".intern();
-    private static final String FIELD_STREAMS = "streams".intern();
+    public static final String FIELD_ID = "_id".intern();
+    public static final String FIELD_MESSAGE = "message".intern();
+    public static final String FIELD_SOURCE = "source".intern();
+    public static final String FIELD_TIMESTAMP = "timestamp".intern();
+    public static final String FIELD_STREAMS = "streams".intern();
 
     private static final Pattern VALID_KEY_CHARS = Pattern.compile("^[\\w\\.\\-]*$");
 
