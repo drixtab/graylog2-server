@@ -87,8 +87,6 @@ public class LibratoClient {
 
         final Response r;
         try {
-            LOG.info(objectMapper.writeValueAsString(payload));
-
             Realm auth = new Realm.RealmBuilder()
                     .setScheme(Realm.AuthScheme.BASIC)
                     .setPrincipal(username)

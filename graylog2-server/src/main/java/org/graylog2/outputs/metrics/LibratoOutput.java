@@ -58,16 +58,21 @@ public class LibratoOutput implements MessageOutput {
 
     public static final String CK_USERNAME = "username";
     public static final String CK_TOKEN = "token";
-    public static final String CK_FIELDS_GAUGES = "fields_gauges";
+    public static final String CK_FIELDS = "fields";
+    public static final String CK_SOURCE = "source";
+    public static final String CK_METRIC_PREFIX = "prefix";
 
     private List<String> gaugeFields;
+    private String source;
 
     private final AsyncHttpClient asyncHttpClient;
     private final ObjectMapper objectMapper;
 
     private LibratoClient client;
 
-    private final ScheduledExecutorService submitService;
+    private Configuration config;
+
+    private ScheduledExecutorService submitService;
 
     private static final int RUN_RATE = 10; // TODO
 
@@ -75,12 +80,6 @@ public class LibratoOutput implements MessageOutput {
     public LibratoOutput(AsyncHttpClient asyncHttpClient, ObjectMapper objectMapper) {
         this.asyncHttpClient = asyncHttpClient;
         this.objectMapper = objectMapper;
-
-        this.submitService = Executors.newSingleThreadScheduledExecutor(
-                new ThreadFactoryBuilder().setNameFormat("librato-submitter-%d").build()
-        );
-
-        this.submitService.scheduleWithFixedDelay(submitMetrics(), RUN_RATE, RUN_RATE, TimeUnit.SECONDS);
     }
 
     @Override
@@ -88,6 +87,14 @@ public class LibratoOutput implements MessageOutput {
         if (!checkConfiguration(config)) {
             throw new MessageOutputConfigurationException("Missing configuration parameters.");
         }
+
+        this.submitService = Executors.newSingleThreadScheduledExecutor(
+                new ThreadFactoryBuilder().setNameFormat("librato-submitter-%d").build()
+        );
+
+        this.submitService.scheduleWithFixedDelay(submitMetrics(), RUN_RATE, RUN_RATE, TimeUnit.SECONDS);
+
+        this.config = config;
 
         this.client = new LibratoClient(
                 URI.create(LIBRATO_URL),
@@ -97,15 +104,17 @@ public class LibratoOutput implements MessageOutput {
                 objectMapper
         );
 
-        this.gaugeFields = Arrays.asList(config.getString(CK_FIELDS_GAUGES).split(","));
+        this.gaugeFields = Arrays.asList(config.getString(CK_FIELDS).split(","));
+        this.source = config.getString(CK_SOURCE);
 
         isRunning = true;
     }
 
     private boolean checkConfiguration(Configuration config) {
         if (isNullOrEmpty(config.getString(CK_USERNAME))
-                || isNullOrEmpty(CK_TOKEN)
-                || isNullOrEmpty(CK_FIELDS_GAUGES)) {
+                || isNullOrEmpty(config.getString(CK_TOKEN))
+                || isNullOrEmpty(config.getString(CK_FIELDS))
+                || isNullOrEmpty(config.getString(CK_SOURCE))) {
             return false;
         }
 
@@ -114,6 +123,7 @@ public class LibratoOutput implements MessageOutput {
 
     @Override
     public void stop() {
+        this.submitService.shutdown();
         this.isRunning = false;
     }
 
@@ -125,6 +135,8 @@ public class LibratoOutput implements MessageOutput {
     @Override
     public void write(Message message) throws Exception {
         for (String field : gaugeFields) {
+            field = field.trim();
+
             LOG.trace("Trying to read field [{}] from message <{}>.", field, message.getId());
             if(!message.getFields().containsKey(field)) {
                 LOG.debug("Message <{}> does not contain field [{}]. Not sending to Librato.", message.getId(), field);
@@ -152,8 +164,16 @@ public class LibratoOutput implements MessageOutput {
             DateTime timestamp = (DateTime) message.getField(Message.FIELD_TIMESTAMP);
             int unixTimestamp = (int) ((timestamp.getMillis())/1000);
 
-            client.addToBuffer(new GaugeMetric("G2TEST." + field, metricValue, unixTimestamp, "graylog2")); // TODO SOURCE
+            client.addToBuffer(new GaugeMetric(metricName(field), metricValue, unixTimestamp, this.source));
         }
+    }
+
+    private String metricName(String field) {
+        if (!isNullOrEmpty(config.getString(CK_METRIC_PREFIX))) {
+            return config.getString(CK_METRIC_PREFIX) + "." + field;
+        }
+
+        return field;
     }
 
     private Runnable submitMetrics() {
@@ -189,15 +209,15 @@ public class LibratoOutput implements MessageOutput {
                 continue;
             }
 
-            LOG.info("Compacting metrics bucket [{}] with {} values.", bucket.getKey(), bucketSize);
+            LOG.debug("Compacting metrics bucket [{}] with {} values.", bucket.getKey(), bucketSize);
 
             double compactResult = mean(bucket.getValue(), bucketSize);
 
-            LOG.info("Compacting result of bucket [{}]: <{}>", bucket.getKey(), compactResult);
+            LOG.debug("Compacting result of bucket [{}]: <{}>", bucket.getKey(), compactResult);
 
             String type = bucket.getValue().get(0).getToplevelName();
             if (type.equals("gauges")) {
-                compacted.add(new GaugeMetric(bucket.getKey(), compactResult, Tools.getUTCTimestamp(), "graylog2")); // TODO SOURCE
+                compacted.add(new GaugeMetric(bucket.getKey(), compactResult, Tools.getUTCTimestamp(), this.source));
             }
         }
 
@@ -242,13 +262,29 @@ public class LibratoOutput implements MessageOutput {
                 "API token",
                 "",
                 "Your Librato API token",
-                ConfigurationField.Optional.NOT_OPTIONAL
-                // TODO: TextField.Attribute.IS_PASSWORD
+                ConfigurationField.Optional.NOT_OPTIONAL,
+                TextField.Attribute.IS_PASSWORD
         ));
 
         r.addField(new TextField(
-                CK_FIELDS_GAUGES,
-                "Message fields to submit as Librato gauge values",
+                CK_SOURCE,
+                "Source to report to Librato",
+                "graylog2",
+                "",
+                ConfigurationField.Optional.NOT_OPTIONAL
+        ));
+
+        r.addField(new TextField(
+                CK_METRIC_PREFIX,
+                "Prefix for metric name",
+                "",
+                "A field called \"response_time\"would be transmitted as \"prefix.reponse_time\"",
+                ConfigurationField.Optional.OPTIONAL
+        ));
+
+        r.addField(new TextField(
+                CK_FIELDS,
+                "Message fields to submit to Librato",
                 "response_time,db_time,view_time",
                 "A comma separated list of field values in messages that should be transmitted to Librato as gauge values.",
                 ConfigurationField.Optional.NOT_OPTIONAL
